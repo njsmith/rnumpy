@@ -600,11 +600,11 @@ _kind_to_sexp = {
     "S": ri.STRSXP,
     "U": ri.STRSXP,
     # "V" -> special-cased below
-    "O": ri.LISTSXP,
+    "O": ri.VECSXP,
     }
 def _arraylike_to_sexp(object, recurse, **kwargs):
     if isinstance(object, ri.Sexp):
-        assert not args and not kwargs
+        assert not kwargs
         return object
     array = np.asarray(object, **kwargs)
     sexp_seq = array.ravel("F")
@@ -635,10 +635,64 @@ def _arraylike_to_sexp(object, recurse, **kwargs):
         # XX FIXME: data.frame returns a data frame with .named == 2, even
         # though in fact we know it is not aliased anywhere else. So it might
         # be worth hacking its NAMED value back:
-        return ri.baseNameSpaceEnv["data.frame"].rcall(df_args)
+        return ri.baseNameSpaceEnv["data.frame"].rcall(tuple(df_args))
     # It should be impossible to get here:
     else:
         raise ValueError, "Unknown numpy array type."
+
+def test__arraylike_to_sexp():
+    # Existing sexps are passed through without change:
+    sexp = ri.SexpVector([10], ri.INTSXP)
+    assert _arraylike_to_sexp(sexp, False) is sexp
+    # Types map through to the right kind of SEXP:
+    s = _arraylike_to_sexp(np.array([True], dtype=bool), False)
+    assert s.typeof == ri.LGLSXP
+    assert s[0] == True
+    s = _arraylike_to_sexp(np.array([1], dtype=int), False)
+    assert s.typeof == ri.INTSXP
+    assert s[0] == 1
+    s = _arraylike_to_sexp(np.array([1], dtype=float), False)
+    assert s.typeof == ri.REALSXP
+    assert s[0] == 1.0
+    s = _arraylike_to_sexp(np.array([1 + 2j], dtype=complex), False)
+    assert s.typeof == ri.CPLXSXP
+    assert s[0] == 1 + 2j
+    s = _arraylike_to_sexp(np.array(["hi"], dtype=str), False)
+    assert s.typeof == ri.STRSXP
+    assert s[0] == "hi"
+    s = _arraylike_to_sexp(np.array(["hi"], dtype=unicode), False)
+    assert s.typeof == ri.STRSXP
+    assert s[0] == "hi"
+    s = _arraylike_to_sexp(np.array(["hi"], dtype=object), True)
+    assert s.typeof == ri.VECSXP
+    assert s[0][0] == "hi"
+    try:
+        _arraylike_to_sexp(np.array(["hi"], dtype=object), False)
+    except ValueError:
+        pass
+    else:
+        assert False
+
+    # Record array:
+    dt = np.dtype([("a", int), ("b", float), ("c", bool)])
+    ra = np.array([(1, 3.2, True), (-10, 0.7, False)], dtype=dt)
+    frame = rcopy(ra)
+    assert frame.r.class_()[0] == "data.frame"
+    assert frame.r.nrow()[0] == 2
+    assert list(frame.r.names()) == ["a", "b", "c"]
+    a = frame.r.dollar("a")
+    assert a[0] == 1 and a[1] == -10
+    b = frame.r.dollar("b")
+    assert b[0] == 3.2 and b[1] == 0.7
+    c = frame.r.dollar("c")
+    assert c[0] == 1 and c[1] == 0
+    
+    # Type autodetection:
+    assert _arraylike_to_sexp([1], False).typeof == ri.INTSXP
+    assert _arraylike_to_sexp([True], False).typeof == ri.LGLSXP
+    assert _arraylike_to_sexp([0.1], False).typeof == ri.REALSXP
+    assert _arraylike_to_sexp([1j], False).typeof == ri.CPLXSXP
+    assert _arraylike_to_sexp(["asdf", "hi"], False).typeof == ri.STRSXP
 
 def _iterable(obj):
     try:
