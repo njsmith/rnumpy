@@ -200,7 +200,11 @@ class RWrapper(object):
         return len(self._sexp)
 
     def __getitem__(self, idx):
-        return self._sexp[idx]
+        item = self._sexp[idx]
+        if isinstance(item, ri.Sexp):
+            return ri2py(item)
+        else:
+            return item
 
 def test_rwrapper():
     sexp = ri.SexpVector([1, 2, 3], ri.INTSXP)
